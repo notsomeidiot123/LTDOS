@@ -141,6 +141,7 @@ data:
     .disc_fat_ptr: dw 0xa000
     .disc_bpb_ptr: dw 0x9000
     .usedsegs_list: dw 0b0000_0000_0000_0001
+    
 
 LTDOS_API_INT:
     iret
@@ -156,6 +157,8 @@ allocate_cluster:
 
 delete_file:
     ;set all clusters in file's cluster chain to 0
+
+;WARNING: DESTRUCTIVE, will destroy any data in DX, AX, and CX
 lba_to_chs:
     push bp
     mov bp, sp
@@ -179,6 +182,7 @@ lba_to_chs:
     pop dx
     .exit:
         pop bp
+        mov ax, 0
         ret
 
 open_disk:
@@ -204,21 +208,24 @@ open_disk:
     mov bx, [data.disc_bpb_ptr]
     int 0x13
     
-    ; push word [es:bx + 0xe]
-    push 1321
+    push word [es:bx + 0xe]
     call lba_to_chs
     add sp, 2
+    
     mov ah, 2
     mov al, [es:bx + 0x16]
-    mov dl, [data.current_disc]
+    mov dl, [bp + 4]
     mov bx, [data.disc_fat_ptr]
     int 0x13
+    mov [data.current_disc], dl
+    
     .exit:
         pop bx
         pop dx
         pop es
         pop cx
         pop bp
+        mov ax, 0
         ret
 
 open_file:
