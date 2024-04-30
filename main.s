@@ -39,8 +39,25 @@ set_load:
     push bootdata.welcome
     call puts
     add sp, 2
+    
     mov ax, 0
-    int 0x80
+    mov es, ax
+    mov bx, 0x7e00
+    mov ah, 2
+    mov al, 3
+    mov ch, 0
+    mov cl, 2
+    mov dh, 0
+    mov dl, 0
+    int 0x13
+    jnc stage_two
+    
+    mov al, ah
+    xor ah, ah
+    push 10
+    push ax
+    call putd
+    add sp, 4
     jmp $
 ; cdelc: puts(char *string)
 puts:
@@ -109,13 +126,115 @@ putd:
         pop bp
         ret
 
-LTDOS_API_INT:
-    iret
-
 bootdata:
     .welcome: db "Welcome to LTDOS by Kimi (Version 0.1.0)", 0xa, 0xd, 0
     .bootdisc: db 0
 
 times 510 - ($-$$) db 0
 db 0x55, 0xaa
+
+FD_HPC equ 2
+FD_SPT equ 36
+
+data:
+    .current_disc: db 0
+    .disc_fat_ptr: dw 0xa000
+    .disc_bpb_ptr: dw 0x9000
+    .usedsegs_list: dw 0b0000_0000_0000_0001
+
+LTDOS_API_INT:
+    iret
+
+
+stage_two:
+    push 'A'
+    call open_disk
+    jmp $
+
+allocate_cluster:
+    ;search fat for free cluster ; claim if 0
+
+delete_file:
+    ;set all clusters in file's cluster chain to 0
+lba_to_chs:
+    push bp
+    mov bp, sp
+    
+    ;calculate sector
+    mov ax, [bp + 4]
+    mov dl, FD_SPT
+    div dl
+    mov cl, ah
+    inc cl
+    ;calculate head
+    and al, 1
+    mov dh, al
+    push dx
+    ;calculate cylinder
+    mov ax, [bp + 4]
+    mov dl, FD_HPC * FD_SPT
+    div dl
+    mov ch, al
+    
+    pop dx
+    .exit:
+        pop bp
+        ret
+
+open_disk:
+    ;ARGS:
+    ;char disc
+    ;read BPB, cache FAT
+    push bp
+    mov bp, sp
+    push cx
+    push dx
+    push es
+    push bx
+    
+    mov ah, 2
+    mov al, 1
+    mov ch, 0
+    mov cl, 1
+    mov dh, 0
+    mov dl, [bp + 4]
+    sub dl, 'A'
+    mov bx, 0
+    mov es, bx
+    mov bx, [data.disc_bpb_ptr]
+    int 0x13
+    
+    ; push word [es:bx + 0xe]
+    push 1321
+    call lba_to_chs
+    add sp, 2
+    mov ah, 2
+    mov al, [es:bx + 0x16]
+    mov dl, [data.current_disc]
+    mov bx, [data.disc_fat_ptr]
+    int 0x13
+    .exit:
+        pop bx
+        pop dx
+        pop es
+        pop cx
+        pop bp
+        ret
+
+open_file:
+    ;ARGS:
+    ;char *file
+    ;FILE *fptr
+    ;find file, return struct
+    ;ptr + 0 = current cluster index
+    ;ptr + 2 = first cluster index
+create_file:
+    ;ARGS:
+    ;char *file
+read_file:
+    ;ARGS:
+    ;FILE *fileptr
+    ;char *buffer
+    ;int size;
+times 2048 - ($-$$) db 0
 times (2880 * 1024) - ($ - $$) db 0
