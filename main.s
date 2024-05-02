@@ -298,15 +298,16 @@ open_file:
         je .tokenize_end
         cmp byte [es:di], '/'
         jne .increment
+        inc cx
         mov byte [es:di], 0
     .increment:
         inc di
         jmp .tokenize
+    .tokenize_count: dw 0
     .tokenize_end:
-    
+    mov [.tokenize_count], cx
     ;OPEN ROOT DIRECTORY
     push es
-    
     xor bx, bx
     mov es, bx
     mov bx, data.disc_bpb_ptr
@@ -316,7 +317,48 @@ open_file:
     call lba_to_chs
     add sp, 2
     
+    xor ax, ax
+    mov al, [es:bx + 0x11]
+    mov bl, 0x20
+    div bl
     
+    mov ah, 2
+    ;You've got to stop using magic numbers...
+    mov bx, 0x1000
+    mov es, bx
+    xor bx, bx
+    int 0x13
+    
+    pop es
+    pop di
+    ;string comparisons against each directory entry
+    mov cx, [.tokenize_count]
+    jcxz .return_not_found
+    .search_directory:
+        push di
+
+    .return:
+        pop si
+        pop di
+        pop ds
+        pop es
+        pop cx
+        pop bx
+        pop dx
+        pop bp
+        xor ax, ax
+        ret
+    .return_not_found:
+        mov ax, 1
+        pop si
+        pop di
+        pop ds
+        pop es
+        pop cx
+        pop bx
+        pop dx
+        pop bp
+        ret
 
 create_file:
     ;ARGS:
