@@ -28,6 +28,8 @@ EBPB:
     .VLS: db "LTDOSBOOTFD"
     .SID: db "FAT16   "
 startup:
+    mov sp, 0
+    mov ss, sp
     mov bp, 0x7a00
     mov sp, 0x7a00
     mov [bootdata.bootdisc], dh
@@ -154,6 +156,7 @@ stage_two:
     call open_disk
     cmp ax, 0
     jne error_halt
+    add sp, 2
     jmp $
 
 error_halt:
@@ -328,14 +331,38 @@ open_file:
     mov es, bx
     xor bx, bx
     int 0x13
+    jc .return_not_found
     
     pop es
     pop di
     ;string comparisons against each directory entry
     mov cx, [.tokenize_count]
-    jcxz .return_not_found
+    mov si, 0x1000
+    mov ds, si
+    xor si, si
     .search_directory:
-        push di
+        pop cx
+        jcxz .return_not_found
+        push cx
+        xor cx, cx
+        xor ax, ax
+        
+        cmp byte [ds:si], 0
+        je .return_not_found
+        
+        cmp si, 0x4000
+        jge .return_not_found
+        
+        repne scasb
+        neg cx
+        
+        repe cmpsb
+        je .load_next_dir
+        add si, 0x20
+        jmp .search_directory
+        
+    .load_next_dir:
+        
 
     .return:
         pop si
