@@ -153,6 +153,14 @@ discinfo:
 LTDOS_API_INT:
     iret
 
+putn:
+    push ax
+    mov ax, 0xe0a
+    int 0x10
+    mov al, 0xd
+    int 0x10
+    pop ax
+    ret
 
 stage_two:
     push 'A'
@@ -160,11 +168,6 @@ stage_two:
     cmp ax, 0
     jne error_halt
     add sp, 2
-    
-    mov ax, [discinfo.cylinders]
-    push 10
-    push ax
-    call putd
     
     mov ax, 0xe41
     int 0x10
@@ -189,12 +192,16 @@ open_disk:
     push cx
     push dx
     push bx
+    push di
+    push es
 
     mov dl, [bp + 4]
     mov [data.current_disc], dl
     sub dl, 'A'
     mov ah, 0x8
     xor al, al
+    xor di, di
+    mov es, di
     int 0x13
     jc .ret_err
     
@@ -204,14 +211,16 @@ open_disk:
     xchg ch, cl
     
     add cx, 1
-    add dl, 1
+    add dh, 1
     
-    mov [discinfo.heads], dl
+    mov [discinfo.heads], dh
     mov [discinfo.sectors], al
     mov [discinfo.cylinders], cx
     
     mov ax, 0
     .ret_err:
+        pop es
+        pop di
         pop bx
         pop dx
         pop cx
@@ -221,7 +230,54 @@ open_disk:
 
 ;WARNING: DESTRUCTIVE, will destroy any data in the GP registers
 lba_to_chs:
+    push bp
+    mov bp, sp
     
+    mov di, [discinfo.sectors]
+    xor dx, dx
+    mov ax, [bp + 4]
+    div di
+    
+    add dx, 1
+    push dx; sectors !PUSH
+    
+    
+    mov di, [discinfo.heads]
+    xor dx, dx
+    div di
+    
+    push dx; head   !PUSH
+    
+    xor dx, dx
+    
+    mov ax, [discinfo.sectors]
+    mov di, [discinfo.heads]
+    mul di
+    mov di, ax
+    
+    mov ax, [bp + 4]
+    xor dx, dx
+    div di
+    mov cx, ax
+    xchg ch, cl
+    and cl, ~0x3f
+    
+    
+    
+    pop dx
+    mov ax, dx
+    
+    pop dx
+    or cl, dl
+    
+    mov dx, ax
+    mov dh, dl
+    mov dl, [data.current_disc]
+    sub dl, 'A'
+    
+    pop bp
+    
+    ret
 
 times 2048 - ($-$$) db 0
 times (2880 * 1024) - ($ - $$) db 0
