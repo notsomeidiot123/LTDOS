@@ -136,9 +136,6 @@ bootdata:
 times 510 - ($-$$) db 0
 db 0x55, 0xaa
 
-FD_HPC equ 2
-FD_SPT equ 36
-
 data:
     .current_disc: db 0
     .disc_fat_ptr: dw 0xa000
@@ -147,7 +144,12 @@ data:
     .err_str: db "An exception has occured. Error ", 0
     .filename_buffer: times 128 db 0
     .ftest: db "startup.sys", 0
-
+    
+discinfo:
+    .heads: dw 0
+    .cylinders: dw 0
+    .sectors: dw 0
+    
 LTDOS_API_INT:
     iret
 
@@ -159,16 +161,14 @@ stage_two:
     jne error_halt
     add sp, 2
     
-    push 0
-    push data.ftest
-    push 0
-    push 0
-    call open_file
+    mov ax, [discinfo.cylinders]
+    push 10
     push ax
+    call putd
+    
     mov ax, 0xe41
     int 0x10
-    cmp ax, 0
-    jne error_halt
+
     jmp $
 
 error_halt:
@@ -183,246 +183,45 @@ error_halt:
     
     jmp $
 
-allocate_cluster:
-    ;search fat for free cluster ; claim if 0
-
-delete_file:
-    ;set all clusters in file's cluster chain to 0
-
-;WARNING: DESTRUCTIVE, will destroy any data in DX, AX, and CX
-lba_to_chs:
-    push bp
-    mov bp, sp
-    xor ax, ax
-    xor dx, dx
-    xor cx, cx
-    ;calculate sector
-    mov ax, [bp + 4]
-    mov dl, FD_SPT
-
-    div dx
-    mov cl, ah
-    inc cl
-    
-    ;calculate head
-    and al, 1
-    mov dh, al
-    push dx
-    ;calculate cylinder
-    mov ax, [bp + 4]
-    mov dl, FD_HPC * FD_SPT
-    div dl
-    mov ch, al
-    
-    pop dx
-    ; jmp $
-    .exit:
-        pop bp
-        mov ax, 0
-        ret
-
 open_disk:
-    ;ARGS:
-    ;char disc
-    ;read BPB, cache FAT
     push bp
     mov bp, sp
     push cx
     push dx
-    push es
     push bx
-    
-    mov ah, 2
-    mov al, 1
-    mov ch, 0
-    mov cl, 1
-    mov dh, 0
+
     mov dl, [bp + 4]
-    sub dl, 'A'
-    mov bx, 0
-    mov es, bx
-    mov bx, [data.disc_bpb_ptr]
-    int 0x13
-    jc .exit_err
-    
-    cmp byte [es:bx + 0x26], 0x29
-    je .read
-    cmp byte [es:bx + 0x26], 0x28
-    jne .exit_err
-    
-    .read:
-    push word [es:bx + 0xe]
-    call lba_to_chs
-    add sp, 2
-    
-    mov ah, 2
-    mov al, [es:bx + 0x16]
-    mov dl, [bp + 4]
-    sub dl, 'A'
-    mov bx, [data.disc_fat_ptr]
-    int 0x13
-    jc .exit_err
     mov [data.current_disc], dl
-    
-    .exit:
-        pop bx
-        pop dx
-        pop es
-        pop cx
-        pop bp
-        mov ax, 0
-        ret
-    .exit_err:
-        mov ax, 1
-        pop bx
-        pop dx
-        pop es
-        pop cx
-        pop bp
-        ret
-
-open_file:
-    ;ARGS:
-    ;char *file
-    ;FILE *fptr
-    ;find file, return struct
-    ;ptr + 0 = current cluster index
-    ;ptr + 2 = first cluster index
-    push bp
-    mov bp, sp
-    push dx
-    push bx
-    push cx
-    push es
-    push ds
-    push di
-    push si
-    
-    mov bx, [bp + 10]
-    mov ds, bx
-    mov si, [bp + 8]
-    
-    mov di, 0
-    mov es, di
-    mov di, data.filename_buffer
-    
-    push di
-    
-    mov cx, 64
-    rep movsw
-    mov ax, 0x0e43
-    int 0x10
-    pop di
-    push di
-    mov cx, 1
-    .tokenize:
-        cmp byte [es:di], 0
-        je .tokenize_end
-        cmp byte [es:di], '/'
-        jne .increment
-        inc cx
-        mov byte [es:di], 0
-    .increment:
-        inc di
-        jmp .tokenize
-    .tokenize_count: dw 0
-    .tokenize_end:
-    mov ax, 0xe44
-    int 0x10
-    xor bx, bx
-    mov ds, bx
-    mov [.tokenize_count], cx
-    ;OPEN ROOT DIRECTORY
-    push es
-    xor bx, bx
-    mov es, bx
-    mov bx, data.disc_bpb_ptr
-    mov ax, [es:bx + 0x10]
-    add ax, [es:bx + 0x0e]
-    push ax
-    mov ax, 0x0e45
-    int 0x10
-    call lba_to_chs
-    
-    add sp, 2
-    mov ax, 0x0e46
-    int 0x10
-    xor ax, ax
-    mov al, [es:bx + 0x11]
-    mov bl, 0x20
-    div bl
-    
-    mov ah, 2
-    ;You've got to stop using magic numbers...
-    mov bx, 0x1000
-    mov es, bx
-    xor bx, bx
+    sub dl, 'A'
+    mov ah, 0x8
+    xor al, al
     int 0x13
-    jc .return_not_found
+    jc .ret_err
     
-    pop es
-    pop di
-    ;string comparisons against each directory entry
-    ; mov cx, [.tokenize_count]
-    ; mov si, 0x1000
-    ; mov ds, si
-    ; xor si, si
-    ; .search_directory:
-    ;     pop cx
-    ;     jcxz .return_not_found
-    ;     push cx
-    ;     xor cx, cx
-    ;     xor ax, ax
-        
-    ;     cmp byte [ds:si], 0
-    ;     je .return_not_found
-        
-    ;     cmp si, 0x4000
-    ;     jge .return_not_found
-        
-    ;     repne scasb
-    ;     neg cx
-        
-    ;     repe cmpsb
-    ;     je .load_next_dir
-    ;     add si, 0x20
-    ;     jmp .search_directory
-        
-    ; .load_next_dir:
-        
-
-    .return:
-        mov ax, 0xe42
-        int 0x10
-        pop si
-        pop di
-        pop ds
-        pop es
-        pop cx
+    mov ax, cx
+    and ax, 0x3f;sectors
+    shr cl, 6;cylinders
+    xchg ch, cl
+    
+    add cx, 1
+    add dl, 1
+    
+    mov [discinfo.heads], dl
+    mov [discinfo.sectors], al
+    mov [discinfo.cylinders], cx
+    
+    mov ax, 0
+    .ret_err:
         pop bx
         pop dx
-        pop bp
-        xor ax, ax
-        ret
-    .return_not_found:
-        mov ax, 1
-        pop si
-        pop di
-        pop ds
-        pop es
         pop cx
-        pop bx
-        pop dx
+        
         pop bp
         ret
 
-create_file:
-    ;ARGS:
-    ;char *file
-read_file:
-    ;ARGS:
-    ;FILE *fileptr
-    ;char *buffer
-    ;int size;
+;WARNING: DESTRUCTIVE, will destroy any data in the GP registers
+lba_to_chs:
+    
+
 times 2048 - ($-$$) db 0
 times (2880 * 1024) - ($ - $$) db 0
