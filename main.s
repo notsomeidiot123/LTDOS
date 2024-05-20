@@ -146,6 +146,7 @@ data:
     .usedsegs_list: dw 0b0000_0000_0000_0011
     .err_str: db "An exception has occured. Error ", 0
     .filename_buffer: times 128 db 0
+    .ftest: db "startup.sys", 0
 
 LTDOS_API_INT:
     iret
@@ -157,6 +158,17 @@ stage_two:
     cmp ax, 0
     jne error_halt
     add sp, 2
+    
+    push 0
+    push data.ftest
+    push 0
+    push 0
+    call open_file
+    push ax
+    mov ax, 0xe41
+    int 0x10
+    cmp ax, 0
+    jne error_halt
     jmp $
 
 error_halt:
@@ -168,6 +180,7 @@ error_halt:
     push 10
     push ax
     call putd
+    
     jmp $
 
 allocate_cluster:
@@ -180,13 +193,17 @@ delete_file:
 lba_to_chs:
     push bp
     mov bp, sp
-    
+    xor ax, ax
+    xor dx, dx
+    xor cx, cx
     ;calculate sector
     mov ax, [bp + 4]
     mov dl, FD_SPT
-    div dl
+
+    div dx
     mov cl, ah
     inc cl
+    
     ;calculate head
     and al, 1
     mov dh, al
@@ -198,6 +215,7 @@ lba_to_chs:
     mov ch, al
     
     pop dx
+    ; jmp $
     .exit:
         pop bp
         mov ax, 0
@@ -292,10 +310,11 @@ open_file:
     
     mov cx, 64
     rep movsw
-    
+    mov ax, 0x0e43
+    int 0x10
     pop di
     push di
-    xor cx, cx
+    mov cx, 1
     .tokenize:
         cmp byte [es:di], 0
         je .tokenize_end
@@ -308,6 +327,10 @@ open_file:
         jmp .tokenize
     .tokenize_count: dw 0
     .tokenize_end:
+    mov ax, 0xe44
+    int 0x10
+    xor bx, bx
+    mov ds, bx
     mov [.tokenize_count], cx
     ;OPEN ROOT DIRECTORY
     push es
@@ -317,9 +340,13 @@ open_file:
     mov ax, [es:bx + 0x10]
     add ax, [es:bx + 0x0e]
     push ax
+    mov ax, 0x0e45
+    int 0x10
     call lba_to_chs
-    add sp, 2
     
+    add sp, 2
+    mov ax, 0x0e46
+    int 0x10
     xor ax, ax
     mov al, [es:bx + 0x11]
     mov bl, 0x20
@@ -336,35 +363,37 @@ open_file:
     pop es
     pop di
     ;string comparisons against each directory entry
-    mov cx, [.tokenize_count]
-    mov si, 0x1000
-    mov ds, si
-    xor si, si
-    .search_directory:
-        pop cx
-        jcxz .return_not_found
-        push cx
-        xor cx, cx
-        xor ax, ax
+    ; mov cx, [.tokenize_count]
+    ; mov si, 0x1000
+    ; mov ds, si
+    ; xor si, si
+    ; .search_directory:
+    ;     pop cx
+    ;     jcxz .return_not_found
+    ;     push cx
+    ;     xor cx, cx
+    ;     xor ax, ax
         
-        cmp byte [ds:si], 0
-        je .return_not_found
+    ;     cmp byte [ds:si], 0
+    ;     je .return_not_found
         
-        cmp si, 0x4000
-        jge .return_not_found
+    ;     cmp si, 0x4000
+    ;     jge .return_not_found
         
-        repne scasb
-        neg cx
+    ;     repne scasb
+    ;     neg cx
         
-        repe cmpsb
-        je .load_next_dir
-        add si, 0x20
-        jmp .search_directory
+    ;     repe cmpsb
+    ;     je .load_next_dir
+    ;     add si, 0x20
+    ;     jmp .search_directory
         
-    .load_next_dir:
+    ; .load_next_dir:
         
 
     .return:
+        mov ax, 0xe42
+        int 0x10
         pop si
         pop di
         pop ds
