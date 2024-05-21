@@ -217,6 +217,35 @@ open_disk:
     mov [discinfo.sectors], al
     mov [discinfo.cylinders], cx
     
+    ;cache discs BPB
+    xor bx, bx
+    mov es, bx
+    mov bx, [data.disc_bpb_ptr]
+    
+    mov ax, 0x0201 ;read one sector
+    mov cx, 0x0001 ;read first sector
+    mov dh, 0x00   ;read first head
+    mov dl, [data.current_disc]
+    sub dl, 'A'
+    int 0x13
+    
+    ;cache discs FAT
+    
+    mov bx, [data.disc_bpb_ptr]
+    push bx
+    push word [bx + 0xe]
+    call lba_to_chs
+    add sp, 2
+    pop bx
+    
+    mov al, [bx + 0x16]
+    mov ah, 0x02
+    
+    xor bx, bx
+    mov es, bx
+    mov bx, [data.disc_fat_ptr]
+    int 0x13
+    
     mov ax, 0
     .ret_err:
         pop es
@@ -262,8 +291,6 @@ lba_to_chs:
     xchg ch, cl
     and cl, ~0x3f
     
-    
-    
     pop dx
     mov ax, dx
     
@@ -279,5 +306,7 @@ lba_to_chs:
     
     ret
 
+open_file:
+    
 times 2048 - ($-$$) db 0
 times (2880 * 1024) - ($ - $$) db 0
