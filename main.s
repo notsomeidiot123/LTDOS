@@ -2,6 +2,11 @@
 ;stack items are 2 bytes wide
 ;first function argument is at bp + 4 after enter
 ;formatted in fat16 cause i hate fat12
+
+;NOTE
+;ptrs are always LONG POINTERS, meaning they take up one DWORD of space
+;1 word for segment (always comes first)
+;1 word for offset  (always comes last)
 org 0x7c00
 bits 16
 BPB:
@@ -37,7 +42,7 @@ startup:
 set_load:
     cld
     mov word [0x100], 0
-    mov word [0x100], LTDOS_API_INT
+    mov word [0x102], LTDOS_API_INT
     mov ax, bootdata.welcome
     push bootdata.welcome
     call puts
@@ -306,7 +311,54 @@ lba_to_chs:
     
     ret
 
-open_file:
+open_file: ;CDECL int open_file(char *fname, FILE *fptr)
+    ;|ARG NAME    | OFFSET|
+    ;|------------|-------|
+    ;|char *fname | 0x6   |
+    ;|FILE *fptr  | 0x4   |
+    ;|------------|-------|
+    ;RETURNS:
+    ;int ecode (0 = success)
+    ;find file, return struct
     
+    ;set up function stack
+    push bp
+    
+    push es
+    push ds
+    push bx
+    push dx
+    push cx
+    push di
+    push si
+    
+    ;Step 1: Copy and Tokenize File name
+    
+    mov bx, [bp + 0x6]
+    
+    ;Step 2: Read Root Directory
+    
+    ;Step 3: Recursively search directories until file is found
+    
+    ;Step 4: set data in struct
+    
+    .ret: ; pop gp registers off of the stack, then return
+        mov ax, 0
+    .ret_err:
+        pop si
+        pop di
+        pop cx
+        pop dx
+        pop bx
+        pop ds
+        pop es
+        
+        pop bp
+        ret
 times 2048 - ($-$$) db 0
+;struct FILE *f{
+    ;uint16_t current_index;
+    ;uint16_t first_cluster_index;
+; }
+
 times (2880 * 1024) - ($ - $$) db 0
