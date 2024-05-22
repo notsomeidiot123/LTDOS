@@ -41,8 +41,8 @@ startup:
     jmp 0:set_load
 set_load:
     cld
-    mov word [0x100], 0
-    mov word [0x102], LTDOS_API_INT
+    mov word [0x202], 0
+    mov word [0x200], LTDOS_API_INT
     mov ax, bootdata.welcome
     push bootdata.welcome
     call puts
@@ -156,6 +156,8 @@ discinfo:
     .sectors: dw 0
     
 LTDOS_API_INT:
+    mov ax, 0xe41
+    int 0x10
     iret
 
 putn:
