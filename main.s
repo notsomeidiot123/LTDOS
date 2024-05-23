@@ -149,6 +149,9 @@ data:
     .err_str: db "An exception has occured. Error ", 0
     .filename_buffer: times 128 db 0
     .ftest: db "startup.sys", 0
+    .kernel_current_file:
+        dw 0
+        dw 0
     
 discinfo:
     .heads: dw 0
@@ -175,6 +178,12 @@ stage_two:
     cmp ax, 0
     jne error_halt
     add sp, 2
+    
+    push data.ftest
+    push 0
+    push 0
+    push 0
+    call open_file
     
     mov ax, 0xe41
     int 0x10
@@ -316,15 +325,18 @@ lba_to_chs:
 open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     ;|ARG NAME    | OFFSET|
     ;|------------|-------|
-    ;|char *fname | 0x6   |
+    ;|char *fname | 0x8   |
     ;|FILE *fptr  | 0x4   |
     ;|------------|-------|
     ;RETURNS:
     ;int ecode (0 = success)
     ;find file, return struct
     
+    ;VERSION 0.1.0: DOES NOT SUPPORT DIRECTORIES
+    
     ;set up function stack
     push bp
+    mov bp, sp
     
     push es
     push ds
@@ -336,7 +348,27 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     
     ;Step 1: Copy and Tokenize File name
     
-    mov bx, [bp + 0x6]
+    mov bx, [bp + 0x8]
+    mov ds, bx
+    mov si, [bp + 0xa]
+    mov bx, 0
+    mov es, bx
+    mov di, data.filename_buffer
+    
+    mov cx, 11;8.3 file name has 11 bytes. Good enough until i start supporting directories
+    rep movsb
+    mov byte [es:di], 0;File name in buffer
+    
+    sub di, 12
+    .tokenloop:
+        inc di
+        cmp byte [es:di], 0
+        je .tokenloop_end
+        cmp byte [es:di], '.'
+        jne .tokenloop
+        mov byte [es:di], 0
+        jmp .tokenloop
+    .tokenloop_end:
     
     ;Step 2: Read Root Directory
     
