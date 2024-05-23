@@ -371,6 +371,19 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     .tokenloop_end:
     
     ;Step 2: Read Root Directory
+    ;first_root_dir_sector = reserved_sector_count + fat_count * fat_size
+    xor dx, dx
+    xor bx, bx
+    mov ds, bx
+    mov bx, [data.disc_bpb_ptr]
+    mov ax, [bx + 0x10]
+    mov cx, [bx + 0x16]
+    mul cx
+    mov cx, [bx + 0x0e]
+    add cx, ax
+    push ax
+    
+    ;root_dir_sector_count = (root_dir_entry_count * 32 + bytes_per_sector - 1)/bytes_per_sector
     
     ;Step 3: Recursively search directories until file is found
     
