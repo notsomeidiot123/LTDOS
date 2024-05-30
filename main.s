@@ -143,8 +143,14 @@ db 0x55, 0xaa
 
 data:
     .current_disc: db 0
-    .disc_fat_ptr: dw 0xa000
+    ;defined as data, to allow for relocation
+    .disc_fat_ptr: dw 0x0000
+    .disc_fat_seg: dw 0x1000
+    .disc_dir_ptr: dw 0xa000
+    .disc_dir_seg: dw 0x0000
     .disc_bpb_ptr: dw 0x9000
+    .disc_bpb_seg: dw 0x0000
+    
     .usedsegs_list: dw 0b0000_0000_0000_0011
     .err_str: db "An exception has occured. Error ", 0
     .filename_buffer: times 128 db 0
@@ -257,7 +263,7 @@ open_disk:
     mov al, [bx + 0x16]
     mov ah, 0x02
     
-    xor bx, bx
+    mov bx, [data.disc_fat_seg]
     mov es, bx
     mov bx, [data.disc_fat_ptr]
     int 0x13
@@ -380,12 +386,25 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     mov cx, [bx + 0x16]
     mul cx
     mov cx, [bx + 0x0e]
-    add cx, ax
-    push ax
+    add cx, ax ;first_root_dir_sector is stored here
+    
+    ; push ax ;push fat_count * fat_size
+    push cx
+    call lba_to_chs
+    add sp, 2
+    mov ax, 0x220 ;read (0x2) 0x20 sectors
+    
+    mov bx, [data.disc_dir_seg]
+    mov es, bx
+    mov bx, [data.disc_dir_ptr]
+    int 0x13 ;CHS address filled by LBA_TO_CHS call
     
     ;root_dir_sector_count = (root_dir_entry_count * 32 + bytes_per_sector - 1)/bytes_per_sector
     
     ;Step 3: Recursively search directories until file is found
+    ;TODO: actually add recursive searching
+    ;TODO: add directory searching
+    ;TODO: get data from struct
     
     ;Step 4: set data in struct
     
