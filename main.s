@@ -154,7 +154,7 @@ data:
     .usedsegs_list: dw 0b0000_0000_0000_0011
     .err_str: db "An exception has occured. Error ", 0
     .filename_buffer: times 128 db 0
-    .ftest: db "startup.sys", 0
+    .ftest: db "TEST.TXT", 0
     .kernel_current_file:
         dw 0
         dw 0
@@ -187,7 +187,7 @@ stage_two:
     
     push data.ftest
     push 0
-    push 0
+    push data.kernel_current_file
     push 0
     call open_file
     
@@ -363,6 +363,7 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     
     mov cx, 11;8.3 file name has 11 bytes. Good enough until i start supporting directories
     rep movsb
+    ; jmp $ ;for debugging
     mov byte [es:di], 0;File name in buffer
     
     sub di, 12
@@ -392,7 +393,7 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     push cx
     call lba_to_chs
     add sp, 2
-    mov ax, 0x220 ;read (0x2) 0x20 sectors
+    mov ax, 0x220 ;read (0x2) 0x20 (32) sectors
     
     mov bx, [data.disc_dir_seg]
     mov es, bx
@@ -406,6 +407,46 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     ;TODO: add directory searching
     ;TODO: get data from struct
     
+    ;set up string pointers
+    mov bx, [data.disc_dir_seg]
+    mov es, bx
+    mov di, [data.disc_dir_ptr]
+    
+    xor bx, bx
+    mov ds, bx
+    ;set cx to max number of entries
+    mov cx, 512
+    .searchloop:
+        mov si, data.filename_buffer
+        mov bx, di
+    .filename_stringcmp:
+        cmp byte [ds:si], 0
+        je .found_filename
+        
+        mov al, [ds:si]
+        cmp al, [es:bx]
+        jne .searchloop_continue
+        inc si
+        inc bx
+        jmp .filename_stringcmp
+    .found_filename:
+        mov ax, bx
+        sub ax, di
+        cmp ax, 8
+        jge .searchloop_end
+        cmp byte [es:bx], '0'
+        je .searchloop_end
+    .searchloop_continue:
+        add di, 32
+        dec cx
+        cmp byte [es:di], 0
+        je   .ret_err
+        jcxz .ret_err
+        jmp .searchloop
+    .searchloop_end:
+        mov ax, 0xe02
+        int 0x10
+    ;cmp data in directory
     ;Step 4: set data in struct
     
     .ret: ; pop gp registers off of the stack, then return
