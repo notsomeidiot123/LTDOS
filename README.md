@@ -5,7 +5,9 @@ In my previous attempts, I've always managed to get my self way in over my own h
 
 This 16-bit version will have only 3 features:
 
-Loading Executables from a FAT-12 formatted floppy disk in COM or MZ format
+Loading Executables from a FAT-16 formatted floppy disk in COM or MZ format
+
 Reading and writing files to said formatted disk
+
 Providing a basic interface for both the user to interact with the system
 
