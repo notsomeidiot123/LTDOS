@@ -580,7 +580,10 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
         
         pop bp
         ret
-    
+
+find_free_cluster:
+    ;search disk_fat_ptr array for any cluster marked 0
+
 times 2048 - ($-$$) db 0
 ;struct FILE *f{
     ;uint16_t current_index;
