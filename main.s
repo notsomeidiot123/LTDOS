@@ -16,7 +16,7 @@ BPB:
     .BPS: dw 512
     .SPC: db 1
     .RSC: dw 4
-    .FTC: db 1
+    .FTC: db 2
     .RDE: dw 512
     .SPV: dw 2880 * 2
     .MDT: db 0xf0
@@ -404,8 +404,6 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     
     ;Step 3: Recursively search directories until file is found
     ;TODO: actually add recursive searching
-    ;TODO: add directory searching
-    ;TODO: get data from struct
     
     ;set up string pointers
     mov bx, [data.disc_dir_seg]
@@ -439,16 +437,37 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     .searchloop_continue:
         add di, 32
         dec cx
-        cmp byte [es:di], 0
-        je   .ret_err
         jcxz .ret_err
-        jmp .searchloop
+        
+        cmp byte [es:di], 0
+        jne  .searchloop
+        
+        mov ax, [bp + 0xa]
+        push ax
+        mov ax, [bp + 0x8]
+        push ax
+        mov ax, [bp + 0x6]
+        push ax
+        mov ax, [bp + 0x4]
+        push ax
+        
+        call create_file
+        add sp, 8
+        jmp .ret
+        ;if file does not exist, create file
+        
+        
     .searchloop_end:
         mov ax, 0xe02
         int 0x10
     ;cmp data in directory
     ;Step 4: set data in struct
-    
+        mov ax, [es:di + 26]
+        mov bx, [bp + 0x4]
+        mov ds, bx
+        mov bx, [bp + 0x6]
+        mov [ds:bx], ax
+        mov [ds:bx + 2], ax
     .ret: ; pop gp registers off of the stack, then return
         mov ax, 0
     .ret_err:
@@ -462,6 +481,106 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
         
         pop bp
         ret
+        
+create_file: ;cdelc void create_file(FILE *file, char *fname)
+    push bp
+    mov bp, sp
+    
+    push es
+    push ds
+    push cx
+    push bx
+    push si
+    push di
+    push dx
+    
+    mov ax, 0xe03
+    int 0x10
+    
+    xor dx, dx
+    xor bx, bx
+    mov ds, bx
+    mov bx, [data.disc_bpb_ptr]
+    mov ax, [bx + 0x10]
+    mov cx, [bx + 0x16]
+    mul cx
+    mov cx, [bx + 0x0e]
+    add cx, ax ;first_root_dir_sector is stored here
+    
+    ; push ax ;push fat_count * fat_size
+    push cx
+    call lba_to_chs
+    add sp, 2
+    mov ax, 0x220 ;read (0x2) 0x20 (32) sectors
+    
+    mov bx, [data.disc_dir_seg]
+    mov es, bx
+    mov bx, [data.disc_dir_ptr]
+    int 0x13 ;CHS address filled by LBA_TO_CHS call
+    
+    mov di, [bp + 0x8]
+    mov es, di
+    mov di, [bp + 0xa]
+    
+    mov si, [data.disc_dir_seg]
+    mov ds, si
+    mov si, [data.disc_dir_ptr]
+    
+    mov ax, 0xffff
+    mov cx, 512
+    .search_free_dirent:
+        cmp byte [ds:si], 0
+        je .set_filename
+        add si, 32
+        dec cx
+        jcxz .return
+        jmp .search_free_dirent
+    .set_filename:
+        mov ax, ds
+        mov bx, es
+        mov ds, bx
+        mov es, ax
+        
+        xchg di, si
+        mov bx, di
+    .sfn_loop:
+        movsw
+        cmp byte [ds:si], 0
+        je .set_file_ext
+        jmp .sfn_loop
+    .set_file_ext:
+        inc si
+        mov di, bx
+        add di, 8
+    .sfe_loop:
+        movsw
+        cmp byte [ds:si], 0
+        je .find_cluster
+        jmp .sfe_loop
+    
+    .find_cluster:
+        mov ax, 0xe04
+        int 0x10
+        ;call find_free_cluster
+        ;fat[cluster_index] = -1
+        ;dirent.first_cluster = cluster_index
+        ;FILE[0] = cluster_index
+        ;FILE[1] = FILE[0]
+    .disk_writeback:
+        ;write_disk(disk_dir, disk, disk_dir_lba)
+        ;write_disk(disk_fat, disk, disk_fat_lba)
+    .return:
+        pop dx
+        pop di
+        pop si
+        pop bx
+        pop cx
+        pop ds
+        pop es
+        
+        pop bp
+        ret
+    
 times 2048 - ($-$$) db 0
 ;struct FILE *f{
     ;uint16_t current_index;
