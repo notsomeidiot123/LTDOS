@@ -284,6 +284,9 @@ lba_to_chs:
     push bp
     mov bp, sp
     
+    xor bx, bx
+    mov ds, bx
+    
     mov di, [discinfo.sectors]
     xor dx, dx
     mov ax, [bp + 4]
@@ -412,6 +415,7 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     
     xor bx, bx
     mov ds, bx
+    mov dx, 8
     ;set cx to max number of entries
     mov cx, 512
     .searchloop:
@@ -509,6 +513,8 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
     
     ; push ax ;push fat_count * fat_size
     push cx
+    
+    push cx
     call lba_to_chs
     add sp, 2
     mov ax, 0x220 ;read (0x2) 0x20 (32) sectors
@@ -522,9 +528,11 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
     mov es, di
     mov di, [bp + 0xa]
     
+    mov si, [data.disc_dir_ptr]
+    push si
     mov si, [data.disc_dir_seg]
     mov ds, si
-    mov si, [data.disc_dir_ptr]
+    pop si ;ds:si contains pointer to loaded directory (root)
     
     mov ax, 0xffff
     mov cx, 512
@@ -541,14 +549,22 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
         mov ds, bx
         mov es, ax
         
-        xchg di, si
+        mov cx, 8
+        
+        xchg di, si ;now es:di contains ptr to loaded directory
         mov bx, di
     .sfn_loop:
         movsw
-        cmp byte [ds:si], 0
+        dec cx
+        cmp byte [ds:si], '.'
         je .set_file_ext
-        jmp .sfn_loop
+        cmp cx, 0
+        jle .set_file_ext
+        cmp byte [ds:si], 0
+        jne .sfn_loop
     .set_file_ext:
+        mov ax, 0xe05
+        int 0x10
         inc si
         mov di, bx
         add di, 8
@@ -561,19 +577,34 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
     .find_cluster:
         mov ax, 0xe04
         int 0x10
+        mov di, bx
         call find_free_cluster
         
-        push ax
+        mov word [es:di + 0x1a], ax ; dirent.first_cluster = cluster_index
+        
+        mov bx, [bp + 4]
+        mov ds, bx
+        mov bx, [bp + 6]
+        
+        mov [ds:bx], ax
+        mov [ds:bx + 2], ax
+        ;FILE[0] = cluster_index
+        ;FILE[1] = FILE[0]
         
         push -1
         push ax
         call set_cluster
         add sp, 4
         
-        ;dirent.first_cluster = cluster_index
-        ;FILE[0] = cluster_index
-        ;FILE[1] = FILE[0]
     .disk_writeback:
+        call lba_to_chs
+        add sp, 2
+        mov ax, 0x320
+        mov bx, [data.disc_dir_seg]
+        mov es, bx
+        mov bx, [data.disc_dir_ptr]
+        int 0x13
+        
         ;write_disk(disk_dir, disk, disk_dir_lba)
         ;write_disk(disk_fat, disk, disk_fat_lba)
     .return:
@@ -588,7 +619,7 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
         pop bp
         ret
 
-find_free_cluster:
+find_free_cluster: ;cdelc uint16_t find_free_cluster()
     ;search disk_fat_ptr array for any cluster marked 0
     push bp
     mov bp, sp
@@ -622,8 +653,8 @@ find_free_cluster:
     pop bp
     ret
 
-set_cluster: ;cdelc set_cluster(uint16_t index, uint16_t value)
-    
+set_cluster: ;cdelc void set_cluster(uint16_t index, uint16_t value)
+    ;set cluster at index to value
     push bp
     mov bp, sp
     
@@ -651,7 +682,90 @@ set_cluster: ;cdelc set_cluster(uint16_t index, uint16_t value)
     
     pop bp
     ret
+
+get_cluster: ;cdelc uint16_t get_cluster(uint16_t index)
+    ;returns the value at cluster index
+    push bp
+    mov bp, sp
     
+    push bx
+    push ds
+    push si
+    push dx
+    
+    mov bx, [data.disc_fat_seg]
+    mov si, [data.disc_fat_ptr]
+    mov ds, bx
+    xor bx, bx
+    
+    .find_cluster_loop:
+        cmp byte [ds:si + bx], 0
+        je .found
+        add bx, 2
+        jmp .find_cluster_loop
+    .found:
+        mov ax, bx
+        xor dx, dx
+        mov bx, 2
+        div bx
+        
+    pop dx
+    pop si
+    pop ds
+    pop bx
+    
+    pop bp
+    ret
+
+write_cluster:
+    push bp
+    mov bp, sp
+    
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push ds
+    push es
+    
+    ;root_dir_sectors = (root_entry_count * 32 + bytes_per_sector - 1)/bytes_per_sector
+    
+    mov bx, [data.disc_bpb_seg]
+    mov cx, [data.disc_bpb_ptr]
+    mov ds, bx
+    mov si, cx
+    xor dx, dx
+    mov ax, [ds:si + 0x11]
+    
+    mov bx, 32
+    mul bx
+    xor dx, dx
+    add ax, 511
+    mov bx, 512
+    div bx
+    push ax
+    
+    ;sector = ((fat_count * fat_size) + reserved_sectors + root_dir_sectors)
+    mov ax, [ds:si + 0x16]
+    mov bl, [ds:si + 0x10]
+    mul bl
+    pop bx
+    add ax, bx
+    add ax, [ds:si + 0xe]
+    
+    
+    
+    pop es
+    pop ds
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    
+    pop bp
+    ret
 times 2048 - ($-$$) db 0
 ;struct FILE *f{
     ;uint16_t current_index;
