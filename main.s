@@ -561,8 +561,15 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
     .find_cluster:
         mov ax, 0xe04
         int 0x10
-        ;call find_free_cluster
-        ;fat[cluster_index] = -1
+        call find_free_cluster
+        
+        push ax
+        
+        push -1
+        push ax
+        call set_cluster
+        add sp, 4
+        
         ;dirent.first_cluster = cluster_index
         ;FILE[0] = cluster_index
         ;FILE[1] = FILE[0]
@@ -583,7 +590,68 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
 
 find_free_cluster:
     ;search disk_fat_ptr array for any cluster marked 0
+    push bp
+    mov bp, sp
+    
+    push bx
+    push ds
+    push si
+    push dx
+    
+    mov bx, [data.disc_fat_seg]
+    mov si, [data.disc_fat_ptr]
+    mov ds, bx
+    xor bx, bx
+    
+    .find_cluster_loop:
+        cmp byte [ds:si + bx], 0
+        je .found
+        add bx, 2
+        jmp .find_cluster_loop
+    .found:
+        mov ax, bx
+        xor dx, dx
+        mov bx, 2
+        div bx
+        
+    pop dx
+    pop si
+    pop ds
+    pop bx
+    
+    pop bp
+    ret
 
+set_cluster: ;cdelc set_cluster(uint16_t index, uint16_t value)
+    
+    push bp
+    mov bp, sp
+    
+    push ds
+    push si
+    push bx
+    push dx
+    
+    mov bx, [data.disc_fat_seg]
+    mov si, [data.disc_fat_ptr]
+    mov ds, bx
+    mov ax, [bp + 4]
+    mov bx, 2
+    xor dx, dx
+    mul bx
+    mov bx, ax
+    
+    mov ax, [bp + 6]
+    mov [ds:si + bx], ax
+    
+    pop dx
+    pop bx
+    pop si
+    pop ds
+    
+    pop bp
+    ret
+    
 times 2048 - ($-$$) db 0
 ;struct FILE *f{
     ;uint16_t current_index;
