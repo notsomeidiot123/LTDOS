@@ -155,6 +155,7 @@ data:
     .err_str: db "An exception has occured. Error ", 0
     .filename_buffer: times 128 db 0
     .ftest: db "TEST.TXT", 0
+    .flag: db "55AA"
     .kernel_current_file:
         dw 0
         dw 0
@@ -364,21 +365,22 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     mov es, bx
     mov di, data.filename_buffer
     
-    mov cx, 11;8.3 file name has 11 bytes. Good enough until i start supporting directories
-    rep movsb
-    ; jmp $ ;for debugging
-    mov byte [es:di], 0;File name in buffer
+    mov bx, di
     
-    sub di, 12
-    .tokenloop:
-        inc di
-        cmp byte [es:di], 0
-        je .tokenloop_end
-        cmp byte [es:di], '.'
-        jne .tokenloop
-        mov byte [es:di], 0
-        jmp .tokenloop
-    .tokenloop_end:
+    mov cx, 11;8.3 file name has 11 bytes. Good enough until i start supporting directories
+    .movlp:
+        movsb
+        dec cx
+        cmp byte [ds:si], 0
+        je .movlpe
+        test cx, cx
+        jne .movlp
+    .movlpe:
+    ; jmp $ ;for debugging
+    mov byte [es:bx + 12], 0;File name in buffer
+    mov byte [es:bx + 8], 0
+    mov di, bx
+    
     
     ;Step 2: Read Root Directory
     ;first_root_dir_sector = reserved_sector_count + fat_count * fat_size
@@ -407,6 +409,7 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     
     ;Step 3: Recursively search directories until file is found
     ;TODO: actually add recursive searching
+    ;TODO: fix file searching
     
     ;set up string pointers
     mov bx, [data.disc_dir_seg]
@@ -415,30 +418,53 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
     
     xor bx, bx
     mov ds, bx
-    mov dx, 8
+    ; mov dx, 8
     ;set cx to max number of entries
     mov cx, 512
     .searchloop:
-        mov si, data.filename_buffer
+        mov si, [bp + 0xa]
         mov bx, di
     .filename_stringcmp:
-        cmp byte [ds:si], 0
-        je .found_filename
+        ; cmp byte [ds:si], 0
+        ; je .found_filename
         
-        mov al, [ds:si]
-        cmp al, [es:bx]
+        ; mov al, [ds:si]
+        ; cmp al, [es:bx]
+        ; jne .searchloop_continue
+        ; inc si
+        ; inc bx
+        ; mov ax, bx
+        ; sub ax, di
+        ; cmp ax, 11
+        ; jle .found_filename
+        mov al, [es:di]
+        cmp al, [ds:si]
         jne .searchloop_continue
         inc si
-        inc bx
+        inc di
+        cmp byte [ds:si], '0'
+        je .found_filename
+        mov ax, di
+        sub ax, bx
+        cmp ax, 11
+        jge .found_filename
+        cmp byte [ds:si], '.'
+        jne .filename_stringcmp
+        mov di, bx
+        add di, 8
+        inc si
         jmp .filename_stringcmp
+        ;took me an hour to fix this... commented out code is staying in commit
     .found_filename:
-        mov ax, bx
-        sub ax, di
-        cmp ax, 8
-        jge .searchloop_end
-        cmp byte [es:bx], '0'
+        ; mov ax, bx
+        ; sub ax, di
+        ; cmp ax, 8
+        ; jge .searchloop_end
+        ; cmp byte [es:bx], '0'
+        mov di, bx
         je .searchloop_end
     .searchloop_continue:
+        mov di, bx
         add di, 32
         dec cx
         jcxz .ret_err
@@ -462,8 +488,6 @@ open_file: ;CDECL int open_file(char *fname, FILE *fptr)
         
         
     .searchloop_end:
-        mov ax, 0xe02
-        int 0x10
     ;cmp data in directory
     ;Step 4: set data in struct
         mov ax, [es:di + 26]
@@ -554,7 +578,7 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
         xchg di, si ;now es:di contains ptr to loaded directory
         mov bx, di
     .sfn_loop:
-        movsw
+        movsb
         dec cx
         cmp byte [ds:si], '.'
         je .set_file_ext
@@ -569,7 +593,7 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
         mov di, bx
         add di, 8
     .sfe_loop:
-        movsw
+        movsb
         cmp byte [ds:si], 0
         je .find_cluster
         jmp .sfe_loop
