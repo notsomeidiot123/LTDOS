@@ -285,6 +285,11 @@ lba_to_chs:
     push bp
     mov bp, sp
     
+    push ds
+    push si
+    push di
+    push es
+    
     xor bx, bx
     mov ds, bx
     
@@ -327,6 +332,12 @@ lba_to_chs:
     mov dh, dl
     mov dl, [data.current_disc]
     sub dl, 'A'
+    
+    
+    pop es
+    pop di
+    pop si
+    pop ds
     
     pop bp
     
@@ -629,6 +640,8 @@ create_file: ;cdelc void create_file(FILE *file, char *fname)
         mov bx, [data.disc_dir_ptr]
         int 0x13
         
+        call fat_writeback
+        
         ;write_disk(disk_dir, disk, disk_dir_lba)
         ;write_disk(disk_fat, disk, disk_fat_lba)
     .return:
@@ -659,7 +672,7 @@ find_free_cluster: ;cdelc uint16_t find_free_cluster()
     xor bx, bx
     
     .find_cluster_loop:
-        cmp byte [ds:si + bx], 0
+        cmp word [ds:si + bx], 0
         je .found
         add bx, 2
         jmp .find_cluster_loop
@@ -716,23 +729,22 @@ get_cluster: ;cdelc uint16_t get_cluster(uint16_t index)
     push ds
     push si
     push dx
+    push cx
     
     mov bx, [data.disc_fat_seg]
     mov si, [data.disc_fat_ptr]
     mov ds, bx
     xor bx, bx
     
-    .find_cluster_loop:
-        cmp byte [ds:si + bx], 0
-        je .found
-        add bx, 2
-        jmp .find_cluster_loop
-    .found:
-        mov ax, bx
-        xor dx, dx
-        mov bx, 2
-        div bx
-        
+    mov ax, [bp + 0x4]
+    mov bx, 2
+    xor dx, dx
+    mul bx
+    
+    mov bx, ax
+    mov ax, [ds:si + bx]
+    
+    pop cx
     pop dx
     pop si
     pop ds
@@ -741,7 +753,10 @@ get_cluster: ;cdelc uint16_t get_cluster(uint16_t index)
     pop bp
     ret
 
-write_cluster:
+write_data_cluster:;cdelc write_data_cluster(int16_t cluster, char *data_buffer)
+    ;ARGS:  data_buffer_ptr : bp + 0x6
+    ;       data_buffer_seg : bp + 0x4
+    ;       cluster         : bp + 0x8
     push bp
     mov bp, sp
     
@@ -770,15 +785,35 @@ write_cluster:
     div bx
     push ax
     
-    ;sector = ((fat_count * fat_size) + reserved_sectors + root_dir_sectors)
+    ;first_data_sector = ((fat_count * fat_size) + reserved_sectors + root_dir_sectors)
     mov ax, [ds:si + 0x16]
     mov bl, [ds:si + 0x10]
     mul bl
     pop bx
+    add ax, bx           ; + root_dir_sectors
+    add ax, [ds:si + 0xe]; + reserved_sectors
+    push ax
+    
+    ;sector_to_read = first_data_sector + cluster * cluster_size_sectors
+    mov al, [ds:si + 0xd]
+    xor ah, ah
+    
+    xor dx, dx
+    mov bx, [bp + 0x8]
+    mul bx; ax = cluster * cluster_size_sectors
+    pop bx
     add ax, bx
-    add ax, [ds:si + 0xe]
     
+    push ax
+    call lba_to_chs
+    add sp, 2
     
+    mov al, [ds:si + 0xd]
+    mov ah, 0x3
+    mov bx, [bp + 0x4]
+    mov es, bx
+    mov bx, [bp + 0x6]
+    int 0x13;write cluster to disk
     
     pop es
     pop ds
@@ -788,6 +823,114 @@ write_cluster:
     pop cx
     pop bx
     
+    pop bp
+    ret
+    
+read_data_cluster:;cdelc read_data_cluster(int16_t cluster, char *data_buffer)
+    ;ARGS:  data_buffer_ptr : bp + 0x6
+    ;       data_buffer_seg : bp + 0x4
+    ;       cluster         : bp + 0x8
+    push bp
+    mov bp, sp
+    
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push ds
+    push es
+    
+    ;root_dir_sectors = (root_entry_count * 32 + bytes_per_sector - 1)/bytes_per_sector
+    
+    mov bx, [data.disc_bpb_seg]
+    mov cx, [data.disc_bpb_ptr]
+    mov ds, bx
+    mov si, cx
+    xor dx, dx
+    mov ax, [ds:si + 0x11]
+    
+    mov bx, 32
+    mul bx
+    xor dx, dx
+    add ax, 511
+    mov bx, 512
+    div bx
+    push ax
+    
+    ;first_data_sector = ((fat_count * fat_size) + reserved_sectors + root_dir_sectors)
+    mov ax, [ds:si + 0x16]
+    mov bl, [ds:si + 0x10]
+    mul bl
+    pop bx
+    add ax, bx           ; + root_dir_sectors
+    add ax, [ds:si + 0xe]; + reserved_sectors
+    push ax
+    
+    ;sector_to_read = first_data_sector + cluster * cluster_size_sectors
+    mov al, [ds:si + 0xd]
+    xor ah, ah
+    
+    xor dx, dx
+    mov bx, [bp + 0x8]
+    mul bx; ax = cluster * cluster_size_sectors
+    pop bx
+    add ax, bx
+    
+    push ax
+    call lba_to_chs
+    add sp, 2
+    
+    mov al, [ds:si + 0xd]
+    mov ah, 0x2
+    mov bx, [bp + 0x4]
+    mov es, bx
+    mov bx, [bp + 0x6]
+    int 0x13;write cluster to disk
+    
+    pop es
+    pop ds
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    
+    pop bp
+    ret
+
+fat_writeback:
+    push bp
+    mov bp, sp
+    pusha
+    
+    mov bx, [data.disc_bpb_seg]
+    mov si, [data.disc_bpb_ptr]
+    mov ds, bx
+    
+    mov bx, [ds:si + 0x16]
+    ; push bx
+    push bx
+    
+    mov ax, [ds:si + 0xe]
+    ; push ax
+    push ax
+    call lba_to_chs
+    add sp, 2
+    
+    mov ah, -7
+    pop bx
+    mov al, bl ;for 2.88mb floppy drives, should not be larger than 22.5 sectors
+    
+    xor bx, bx
+    mov ds, bx
+    mov bx, [data.disc_fat_seg]
+    mov es, bx
+    mov bx, [data.disc_fat_ptr]
+    
+    int 0x13
+    
+    popa
     pop bp
     ret
 times 2048 - ($-$$) db 0
